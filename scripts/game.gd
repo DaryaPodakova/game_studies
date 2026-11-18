@@ -3,9 +3,11 @@ extends Control
 ## Нужно за час с небольшим получить справку о доходах у Любови Генриховны (ЛГ).
 ## Каждое действие стоит минут, на экране часы и шкала «Уважение ЛГ».
 ## Умасливание — ритуал, а не платёж: шоколадка работает только после 1С и чая.
-## Весь текст и цифры баланса лежат в scripts/rounds_data.gd.
+## Данные бухгалтерии лежат в scripts/rounds_data.gd.
+## Школьная серия использует scripts/school_day.gd и scripts/school_data.gd.
 
 const Data = preload("res://scripts/rounds_data.gd")
+const SchoolDay = preload("res://scripts/school_day.gd")
 
 const PANEL := Rect2(300, 136, 930, 396)
 const PORTRAIT_BOX := Rect2(36, 130, 243, 300)   # подложка и место портрета ЛГ
@@ -56,7 +58,8 @@ const MUTED := Color("#9db3b0")
 const YOU := Color("#8ec8ff")
 const SKIN := Color("#f1c9a5")
 
-var phase := "menu"           # menu / title / play / end
+var phase := "menu"           # menu / title / play / end / school
+var school: SchoolDay
 var menu_sel := 1             # выбранная карточка серии
 var menu_toast := ""
 var menu_toast_t := 0.0
@@ -155,6 +158,11 @@ func _ready() -> void:
 		"late": _make_tone([523.0, 440.0, 349.0], 0.5),
 		"lose": _make_tone([330.0, 262.0, 196.0], 0.6),
 		"click": _make_click(),
+		"school_bell": _make_tone([880.0, 1318.5, 1760.0], 0.36),
+		"school_door": _make_melody([262.0, 294.0, 246.9], 0.10),
+		"school_chair": _make_melody([196.0, 208.0, 185.0], 0.08),
+		"school_ruler": _make_click(),
+		"school_whistle": _make_tone([1760.0, 2070.0], 0.22),
 		"wait": _make_melody([523.0, 659.0, 784.0, 659.0, 523.0, 659.0, 784.0, 880.0], 0.28),
 	}
 
@@ -727,6 +735,8 @@ func _fmt(minutes: int) -> String:
 # ---------------------------------------------------------------- ход времени
 
 func _process(delta: float) -> void:
+	if phase == "school":
+		return
 	menu_toast_t = maxf(0.0, menu_toast_t - delta)
 	clock_shown = move_toward(clock_shown, float(mini(clock, Data.CLOCK_END)), delta * CLOCK_SPEED)
 	respect_shown = move_toward(respect_shown, float(respect), delta * 6.0)
@@ -775,6 +785,8 @@ func _process(delta: float) -> void:
 # ---------------------------------------------------------------- ввод
 
 func _input(event: InputEvent) -> void:
+	if phase == "school":
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var code: int = event.keycode
 		if code == KEY_ESCAPE:
@@ -845,6 +857,15 @@ func _input(event: InputEvent) -> void:
 
 
 func _to_menu() -> void:
+	if is_instance_valid(school):
+		school.set_process(false)
+		school.set_process_input(false)
+		school.set_process_unhandled_input(false)
+		school.hide()
+		school.queue_free()
+		school = null
+	for player in players:
+		player.stop()
 	phase = "menu"
 	looking = false
 	listen_active = false
@@ -880,7 +901,16 @@ func _menu_key(code: int) -> void:
 func _open_episode(i: int) -> void:
 	if bool(Data.EPISODES[i]["open"]):
 		episode = i
-		phase = "title"
+		if Data.EPISODES[i].get("mode", "") == "school":
+			phase = "school"
+			school = SchoolDay.new()
+			school.leave_requested.connect(_to_menu)
+			school.sound_requested.connect(_play)
+			add_child(school)
+			get_viewport().set_input_as_handled()
+			queue_redraw()
+		else:
+			phase = "title"
 		_play("up")
 	else:
 		menu_toast = Data.MENU_LOCKED
@@ -976,6 +1006,8 @@ func _text(pos: Vector2, text: String, size: int, color: Color, align := HORIZON
 
 
 func _draw() -> void:
+	if phase == "school":
+		return
 	_draw_background()
 	if phase == "menu":
 		_draw_menu_screen()
@@ -1481,7 +1513,13 @@ func _draw_episode_card(i: int, ep: Dictionary) -> void:
 	box_style.set_corner_radius_all(8)
 	box_style.set_border_width_all(2)
 	var inner := rect.grow(-3.0)
-	if open:
+	if ep.get("mode", "") == "school":
+		draw_rect(inner, SchoolDay.BOARD)
+		_text(inner.position + Vector2(22, 31), "ОБРАЗОВАНИЕ", 16, PAPER)
+		var ticket := Rect2(inner.position + Vector2(22, 54), Vector2(inner.size.x - 44, 65))
+		SchoolDay.draw_ticket(self, ticket)
+		_text(ticket.position + Vector2(14, 39), "КИНО   /   15:30", 23, SchoolDay.INK)
+	elif open:
 		# постер: фон кабинета и портрет ЛГ
 		if background != null:
 			draw_texture_rect(background, inner, false)
