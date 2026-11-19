@@ -16,6 +16,7 @@ const START := 8 * 60 + 30
 const LESSON_MIN := 45
 const BREAK_MIN := 10
 const RUN_SECONDS := 20.0
+const SUNNY_WINDOW_FILE := "res://assets/art/backgrounds/school_sunny_window.png"
 const PACE_NAMES := ["Отдышаться", "Держать темп", "Ускориться"]
 const PACE_SPEED := [1.5, 3.4, 5.5]
 const PACE_STAMINA := [20.0, -5.0, -14.0]
@@ -30,6 +31,10 @@ var minutes := START
 var grades: Array[int] = []
 var energy := 2
 var used_bun := false
+var energy_before_mark := 2
+var bun_energy_before := 0
+var chat_messages: Array = []
+var chat_narration := ""
 var round_index := 0
 var round_correct := false
 var mistakes := 0
@@ -62,6 +67,7 @@ var joke_left := 0.0
 var swipe_start := Vector2.ZERO
 var swipe_finger := -1
 var portrait_atlas: Texture2D
+var sunny_window: Texture2D
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -71,6 +77,8 @@ func _ready() -> void:
 	page.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if ResourceLoader.exists(D.PORTRAIT_ATLAS):
 		portrait_atlas = load(D.PORTRAIT_ATLAS) as Texture2D
+	if ResourceLoader.exists(SUNNY_WINDOW_FILE):
+		sunny_window = load(SUNNY_WINDOW_FILE) as Texture2D
 	_render()
 
 func _change(next: String) -> void:
@@ -84,6 +92,10 @@ func _start_day() -> void:
 	grades.clear()
 	energy = 2
 	used_bun = false
+	energy_before_mark = 2
+	bun_energy_before = 0
+	chat_messages.clear()
+	chat_narration = ""
 	knowledge.clear()
 	timeline.clear()
 	hinted_rounds.clear()
@@ -92,7 +104,7 @@ func _start_day() -> void:
 	feedback = ""
 	ending = ""
 	joke_left = 0.0
-	time_left = 3.0
+	time_left = 0.0
 	sound_requested.emit("school_bell")
 	_change("schedule")
 
@@ -296,6 +308,7 @@ func _finish_lesson(grade: int, line: String) -> void:
 	if grades.size() != lesson:
 		return
 	grades.append(grade)
+	energy_before_mark = energy
 	energy = maxi(0, energy - 1)
 	minutes = _lesson_start() + LESSON_MIN
 	feedback = line
@@ -312,7 +325,7 @@ func _after_mark() -> void:
 		0: _change("break_chat")
 		3: _change("break_bun")
 		4: _change("afternoon")
-		_: _next_lesson()
+		_: _change("break_calm")
 
 func _after_wait() -> void:
 	minutes = 15 * 60
@@ -322,6 +335,7 @@ func _eat_bun() -> void:
 	if stage != "break_bun" or used_bun:
 		return
 	used_bun = true
+	bun_energy_before = energy
 	energy = mini(2, energy + 1)
 	_render()
 
@@ -334,10 +348,14 @@ func _total_tasks() -> int:
 	return D.HOMEWORK_BASE + grades.count(5) + grades.count(2)
 
 func _after_school(index: int) -> void:
+	chat_messages.clear()
+	chat_narration = ""
 	match index:
-		0: feedback = "Сделано: 1/%d. Осталось: %d." % [_total_tasks(), _total_tasks() - 1]
-		1: feedback = "Классная: «Куда? А ДЗ?»\nВыход закрыт до выполнения заданий. Выход откроется после 11 класса."
-		2: feedback = "Макс: «Ты где? Фильм уже начался.»\nВы: «Тут ДЗ.»\nМакс: «Понял. Тогда я пойду.»\nБилет пропал."
+		0: feedback = "Сеанс уже начался, пока вы разбирались со списком.\nСделано: 1/%d. Осталось: %d." % [_total_tasks(), _total_tasks() - 1]
+		1: feedback = "Классная: «Куда? А ДЗ?»\nВыход закрыт до выполнения заданий. Выход откроется после 11 класса.\nНачало сеанса уже пропущено из-за задержки у списка."
+		2:
+			chat_messages = D.AFTER_MESSAGES["messages"].duplicate(true)
+			chat_narration = D.AFTER_MESSAGES["narration"]
 	_change("after_reply")
 
 func _show_ending() -> void:
@@ -351,22 +369,27 @@ func _process(delta: float) -> void:
 		joke_left -= delta
 		if joke_left <= 0.0 and is_instance_valid(joke):
 			joke.hide()
-	if stage == "schedule":
-		time_left -= delta
-		if time_left <= 0.0:
-			_change("intro")
-	elif stage == "pace":
+	if stage == "pace":
 		_run_tick(delta)
 
 func _decimal(value: float) -> String:
 	return ("%.1f" % value).replace(".", ",")
 
 func _clock() -> String:
-	return "%02d:%02d" % [floori(minutes / 60.0), minutes % 60]
+	return _format_time(minutes)
+
+func _format_time(value: int) -> String:
+	return "%02d:%02d" % [floori(value / 60.0), value % 60]
+
+func _break_period() -> String:
+	return "%s–%s" % [_format_time(minutes), _format_time(minutes + BREAK_MIN)]
 
 func _show_exit_joke() -> void:
 	joke_left = 3.5
 	joke.show()
+
+func _chat_visible() -> bool:
+	return stage in ["intro", "intro_reply", "break_chat", "chat_reply"] or (stage == "after_reply" and not chat_messages.is_empty())
 
 func _input(event: InputEvent) -> void:
 	if is_queued_for_deletion() or not is_visible_in_tree():
@@ -437,9 +460,12 @@ func _draw() -> void:
 	draw_line(Vector2(46, 90), Vector2(1234, 90), Color("#8eaa93"), 2)
 	draw_rect(Rect2(56, 126, 843, 490), Color("#101f23"))
 	draw_rect(Rect2(48, 118, 843, 490), PAPER)
-	for y in range(217, 606, 28):
-		draw_line(Vector2(49, y), Vector2(890, y), Color("#d8dace"))
-	draw_line(Vector2(78, 118), Vector2(78, 608), Color("#d6a89a"))
+	if _chat_visible():
+		draw_style_box(_style(Color("#d5e3dd"), Color("#abc3b6"), 14), Rect2(84, 132, 772, 163 if stage == "break_chat" else 333))
+	else:
+		for y in range(217, 606, 28):
+			draw_line(Vector2(49, y), Vector2(890, y), Color("#d8dace"))
+		draw_line(Vector2(78, 118), Vector2(78, 608), Color("#d6a89a"))
 	draw_rect(Rect2(916, 118, 317, 490), BOARD)
 	if stage in ["catalog", "ending"]:
 		draw_ticket(self, Rect2(100, 354 if stage == "catalog" else 433, 735, 76))
@@ -550,7 +576,8 @@ func _sidebar() -> void:
 		for i in D.OTHER_TOPICS.size():
 			_label(Rect2(940, 240 + i * 88, 269, 82), D.OTHER_TOPICS[i], 17, Color("#a5afac"))
 		return
-	if portrait_atlas != null:
+	var at_lesson := stage in ["briefing", "cards", "answer", "circuit", "timeline", "pace", "mark"]
+	if at_lesson and portrait_atlas != null:
 		var portrait := TextureRect.new()
 		var atlas := AtlasTexture.new()
 		atlas.atlas = portrait_atlas
@@ -562,14 +589,28 @@ func _sidebar() -> void:
 		portrait.size = Vector2(277, 209)
 		portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		page.add_child(portrait)
-	_label(Rect2(940, 338, 270, 34), D.TEACHERS[lesson], 22, GOLD)
+	if at_lesson:
+		_label(Rect2(940, 338, 270, 34), D.TEACHERS[lesson], 22, GOLD)
+	else:
+		_label(Rect2(940, 146, 270, 42), "Дневник", 29, PAPER)
+	var row_top := 381 if at_lesson else 205
 	for i in D.SUBJECTS.size():
-		var y := 381 + i * 29
+		var y := row_top + i * 29
 		var col := GOLD if i == lesson else Color("#d0d9ce")
 		_label(Rect2(940, y, 218, 29), D.SUBJECTS[i], 17, col)
 		_label(Rect2(1178, y, 35, 29), str(grades[i]) if i < grades.size() else "·", 18, col)
-	_label(Rect2(940, 536, 270, 29), "Средний   " + (_decimal(_average()) if not grades.is_empty() else "—"), 18, PAPER)
-	_label(Rect2(940, 566, 256, 32), "Силы   " + D.ENERGY[energy], 18, GOLD)
+	var summary_y := 536 if at_lesson else 380
+	_label(Rect2(940, summary_y, 270, 29), "Средний   " + (_decimal(_average()) if not grades.is_empty() else "—"), 18, PAPER)
+	_label(Rect2(940, summary_y + 30, 270, 29), "Силы %d/3 · %s" % [energy + 1, D.ENERGY[energy]], 18, GOLD)
+	for i in 3:
+		var segment := ColorRect.new()
+		segment.position = Vector2(940 + i * 90, summary_y + 61)
+		segment.size = Vector2(79, 9)
+		segment.color = GOLD if i <= energy else Color("#405b57")
+		segment.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		page.add_child(segment)
+	if not at_lesson:
+		_label(Rect2(940, 505, 269, 78), "Сеанс с Максом\n15:30", 21, GOLD)
 
 func _render() -> void:
 	for child in page.get_children():
@@ -597,12 +638,14 @@ func _render() -> void:
 			_body("Пять уроков — пять работ. Сдача каждой работы записывает оценку и открывает следующий урок.\n\nАлгебра, русский, физика, история, физкультура.", 249, 24)
 			_main_button("Проверить телефон", func(): _change("intro"))
 		"intro":
-			_heading("Чат класса", "Макс")
-			_body(D.INTRO, 249, 25)
+			_draw_chat([{"speaker": "Макс", "text": D.INTRO}], "")
 			_choices(D.INTRO_OPTIONS, _intro_choice, 391)
 		"intro_reply", "chat_reply", "after_reply":
-			_heading("Сообщения", "После списка" if stage == "after_reply" else "Чат с Максом")
-			_body(feedback)
+			if _chat_visible():
+				_draw_chat(chat_messages, chat_narration)
+			else:
+				_heading("После списка", "Начало сеанса пропущено")
+				_body(feedback, 247, 23)
 			if stage == "intro_reply": _main_button("На алгебру", _briefing)
 			elif stage == "chat_reply": _main_button("На русский", _next_lesson)
 			else: _main_button("Итог дня", _show_ending)
@@ -622,20 +665,30 @@ func _render() -> void:
 		"pace": _draw_run_page()
 		"mark":
 			_heading("Дневник  /  " + D.SUBJECTS[lesson], "Оценка за урок: %d" % grades.back())
-			_body(feedback, 249, 24)
+			_body("%s\n\nСилы после урока: было %d/3, стало %d/3." % [feedback, energy_before_mark + 1, energy + 1], 249, 22)
 			_main_button("В раздевалку" if lesson == 4 else "На перемену", _after_mark)
 		"afternoon":
 			_heading("После пятого урока", "Школа продолжается")
 			_body(D.AFTER_LESSONS)
 			_main_button("К выходу   ·   15:00", _after_wait)
 		"break_chat":
-			_heading("Перемена  /  10 минут", "Макс: «Ну как?»")
+			_draw_chat([{"speaker": "Макс", "text": "Ну как?"}], D.BREAK_LINES[lesson], "Перемена 10 минут  /  " + _break_period())
 			_choices(["Нормально", "Не спрашивай"], _chat_choice, 380)
+		"break_calm":
+			_heading("Перемена  /  10 минут  /  " + _break_period(), "Передышка в коридоре")
+			_label(Rect2(100, 239, 735, 59), D.BREAK_LINES[lesson], 20)
+			_window_photo(Rect2(100, 300, 735, 210))
+			_main_button("Следующий урок   ·   " + _format_time(minutes + BREAK_MIN), _next_lesson)
 		"break_bun":
-			_heading("Перемена  /  10 минут", "Перед физкультурой")
-			_body("Булочка съедена. На старте бега будет больше выносливости." if used_bun else "Булочка возвращает одну ступень сил и добавляет выносливость на старте бега.", 249, 24)
-			if not used_bun: _button(Rect2(100, 451, 735, 49), "Съесть булочку", _eat_bun)
-			_main_button("На физкультуру", _next_lesson)
+			_heading("Перемена  /  10 минут  /  " + _break_period(), "Перед физкультурой")
+			if used_bun:
+				_body("Булочка съедена: +1 ступень сил.\nСилы выросли с %d/3 до %d/3.\nВыносливость перед бегом выросла с %d до %d." % [bun_energy_before + 1, energy + 1, 50 + bun_energy_before * 15, 50 + energy * 15], 239, 22)
+				_window_photo(Rect2(100, 365, 735, 147))
+			else:
+				_label(Rect2(100, 239, 735, 71), "Перекусите и переведите дух. Булочка даст +1 ступень сил и +15 выносливости на старте бега.", 21)
+				_window_photo(Rect2(100, 316, 735, 120))
+				_button(Rect2(100, 451, 735, 49), "Съесть булочку   ·   +1 ступень сил", _eat_bun)
+			_main_button("На физкультуру   ·   " + _format_time(minutes + BREAK_MIN), _next_lesson)
 		"homework": _draw_homework_page()
 		"choice":
 			_heading("У выхода  /  Классная", "Домашнее задание")
@@ -644,12 +697,58 @@ func _render() -> void:
 		"ending": _draw_ending_page()
 
 func _intro_choice(index: int) -> void:
-	feedback = D.INTRO_REPLIES[index]
+	chat_messages = D.INTRO_REPLIES[index]["messages"].duplicate(true)
+	chat_narration = D.INTRO_REPLIES[index]["narration"]
 	_change("intro_reply")
 
 func _chat_choice(index: int) -> void:
-	feedback = "Макс: «Ну как?»\nВы: «%s»" % ["Нормально" if index == 0 else "Не спрашивай"]
+	chat_messages = [
+		{"speaker": "Макс", "text": "Ну как?"},
+		{"speaker": "Вы", "text": "Нормально" if index == 0 else "Не спрашивай"},
+	]
+	chat_narration = D.BREAK_LINES[0]
 	_change("chat_reply")
+
+func _draw_chat(messages: Array, narration: String, kicker := "Сообщения") -> void:
+	_label(Rect2(100, 142, 735, 27), kicker.to_upper(), 16, MUTED)
+	_label(Rect2(100, 174, 735, 40), "Макс", 28)
+	var font := ThemeDB.fallback_font
+	var y := 218.0
+	for message in messages:
+		var yours: bool = message["speaker"] == "Вы"
+		var text: String = message["text"]
+		var text_height := font.get_multiline_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, 616, 18).y
+		var height := text_height + 29.0
+		var x := 195.0 if yours else 100.0
+		var bubble := Panel.new()
+		bubble.position = Vector2(x, y)
+		bubble.size = Vector2(640, height)
+		bubble.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bubble.add_theme_stylebox_override("panel", _style(Color("#bed7c5") if yours else Color("#f9faf5"), Color("#adc3b4"), 12))
+		page.add_child(bubble)
+		_label(Rect2(x + 12, y + 5, 616, 17), message["speaker"], 11, MUTED)
+		_label(Rect2(x + 12, y + 22, 616, text_height + 4), text, 18)
+		y += height + 8.0
+	if narration != "":
+		_label(Rect2(100, 307 if stage == "break_chat" else 475, 735, 62 if stage == "break_chat" else 48), narration, 18 if stage == "break_chat" else 16, MUTED)
+
+func _window_photo(rect: Rect2) -> void:
+	if sunny_window == null:
+		return
+	var frame := Panel.new()
+	frame.position = rect.position - Vector2(2, 2)
+	frame.size = rect.size + Vector2(4, 4)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_theme_stylebox_override("panel", _style(PAPER, MUTED, 1))
+	page.add_child(frame)
+	var photo := TextureRect.new()
+	photo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	photo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	photo.texture = sunny_window
+	photo.position = rect.position
+	photo.size = rect.size
+	photo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	page.add_child(photo)
 
 func _draw_cards_page() -> void:
 	_heading("%s  /  Шаг %d из 3" % [D.SUBJECTS[lesson], round_index + 1], "Решите уравнение" if lesson == 0 else "Исправьте записку")
@@ -753,9 +852,16 @@ func _read_list() -> void:
 
 func _draw_ending_page() -> void:
 	var result: Array = D.RESULTS[ending]
-	_heading("Итог дня", result[0])
-	var additions := "Повышенной сложности: %d. На исправление: %d." % [grades.count(5), grades.count(2)]
-	_body("Классная: «%s»\n%s\n%s\nМакс: «Мы уже на титрах.»" % [result[1], additions, result[2]], 243, 20)
-	_label(Rect2(124, 452, 555, 45), "БИЛЕТ НА КИНО   /   ПРОПАЛ", 22, RED)
-	_label(Rect2(100, 386, 740, 40), "Домашнее задание: %d    ·    Оценка за день: %s" % [_total_tasks(), _decimal(_average())], 22, BLUE)
+	_heading(result[2], result[0])
+	_label(Rect2(100, 239, 735, 60), "Классная: «%s»" % result[1], 20)
+	_label(Rect2(100, 303, 735, 29), "Дополнительно к домашнему заданию", 18, BLUE)
+	var fives := grades.count(5)
+	var twos := grades.count(2)
+	var tasks := ["заданий", "задание", "задания", "задания", "задания", "заданий"]
+	var five_names := ["пятёрок", "пятёрку", "пятёрки", "пятёрки", "пятёрки", "пятёрок"]
+	var two_names := ["двоек", "двойку", "двойки", "двойки", "двойки", "двоек"]
+	_label(Rect2(100, 333, 735, 57), "%d %s повышенной сложности за %d %s.\n%d %s на исправление за %d %s." % [fives, tasks[fives], fives, five_names[fives], twos, tasks[twos], twos, two_names[twos]], 18)
+	_label(Rect2(100, 398, 740, 32), "Всего заданий: 214 + %d + %d = %d. Средний балл: %s." % [fives, twos, _total_tasks(), _decimal(_average())], 18, BLUE)
+	_label(Rect2(124, 446, 555, 31), "НАЧАЛО СЕАНСА ПРОПУЩЕНО", 21, RED)
+	_label(Rect2(124, 479, 555, 26), "15:30 · Задержка за списком домашнего задания", 15, INK)
 	_main_button("Сыграть ещё раз", _start_day)
