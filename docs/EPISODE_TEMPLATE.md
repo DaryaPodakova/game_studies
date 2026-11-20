@@ -220,8 +220,8 @@ id (уникальный):         название:       место на фо�
 | Монолог | `C1_CHUNKS`, `LISTEN_NEEDED`, `LISTEN_MAX_INTERRUPTS` | `_listen_update`, `_listen_end` |
 | Цена действий, отношение, финал | `COST`, `RESPECT_DELTA`, `DEADLINE`, `COPY_WINDOW`, `CLOCK_END`, `ENDINGS` | `_chocolate`, `_stamp`, `_check_time`, `_draw_end` |
 
-Вторая серия уже подключена. В `_open_episode` карточка с `mode: "school"` создаёт `SchoolDay`, остальные открытые карточки используют существующий путь «Бухгалтерии».
-`scripts/school_data.gd` хранит школьные реплики и задания, `scripts/school_day.gd` — состояние, обработчики и интерфейс. Сигнал `leave_requested` возвращает в общий каталог, `sound_requested` вызывает звук в `game.gd`.
+В `_open_episode` карточка с `mode: "school"` создаёт `SchoolDay`, с `mode: "patient"` — `PatientDay`. «Бухгалтерия» использует первоначальный путь.
+`scripts/school_data.gd` хранит школьные реплики и задания, `scripts/school_day.gd` — состояние, обработчики и интерфейс. У поликлиники соответствующая пара — `scripts/patient_data.gd` и `scripts/patient_day.gd`. Сигнал `leave_requested` возвращает в общий каталог, `sound_requested` вызывает звук в `game.gd`. [Пример поликлиники](PATIENT.md)
 При добавлении серии проверьте путь от выбранной карточки до её вступления, игры, финала и перезапуска. [Навык сборки серии](../.agents/skills/buro-episode-integration/SKILL.md)
 
 ### Приёмка серии

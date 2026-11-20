@@ -5,9 +5,11 @@ extends Control
 ## Умасливание — ритуал, а не платёж: шоколадка работает только после 1С и чая.
 ## Данные бухгалтерии лежат в scripts/rounds_data.gd.
 ## Школьная серия использует scripts/school_day.gd и scripts/school_data.gd.
+## Серия про Нику использует отдельный scripts/patient_day.gd.
 
 const Data = preload("res://scripts/rounds_data.gd")
 const SchoolDay = preload("res://scripts/school_day.gd")
+const PATIENT_SCRIPT := "res://scripts/patient_day.gd"
 
 const PANEL := Rect2(300, 136, 930, 396)
 const PORTRAIT_BOX := Rect2(36, 130, 243, 300)   # подложка и место портрета ЛГ
@@ -58,8 +60,9 @@ const MUTED := Color("#9db3b0")
 const YOU := Color("#8ec8ff")
 const SKIN := Color("#f1c9a5")
 
-var phase := "menu"           # menu / title / play / end / school
+var phase := "menu"           # menu / title / play / end / school / patient
 var school: SchoolDay
+var patient: Control
 var menu_sel := 1             # выбранная карточка серии
 var menu_toast := ""
 var menu_toast_t := 0.0
@@ -131,12 +134,16 @@ var portraits: Dictionary = {}
 var endings_art: Dictionary = {}
 var items_art: Dictionary = {}
 var background: Texture2D
+var patient_background: Texture2D
+var patient_cast: Texture2D
 
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
 	# картинки необязательны: нет файла, рисуем кодом
 	background = _load_tex(BACKGROUND_FILE)
+	patient_background = _load_tex("backgrounds/patient_clinic.png")
+	patient_cast = _load_tex("portraits/patient_cast.png")
 	for key in PORTRAIT_FILES:
 		portraits[key] = _load_tex(str(PORTRAIT_FILES[key]))
 	for key in ENDING_FILES:
@@ -735,7 +742,7 @@ func _fmt(minutes: int) -> String:
 # ---------------------------------------------------------------- ход времени
 
 func _process(delta: float) -> void:
-	if phase == "school":
+	if phase in ["school", "patient"]:
 		return
 	menu_toast_t = maxf(0.0, menu_toast_t - delta)
 	clock_shown = move_toward(clock_shown, float(mini(clock, Data.CLOCK_END)), delta * CLOCK_SPEED)
@@ -785,7 +792,7 @@ func _process(delta: float) -> void:
 # ---------------------------------------------------------------- ввод
 
 func _input(event: InputEvent) -> void:
-	if phase == "school":
+	if phase in ["school", "patient"]:
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var code: int = event.keycode
@@ -857,13 +864,13 @@ func _input(event: InputEvent) -> void:
 
 
 func _to_menu() -> void:
-	if is_instance_valid(school):
-		school.set_process(false)
-		school.set_process_input(false)
-		school.set_process_unhandled_input(false)
-		school.hide()
-		school.queue_free()
-		school = null
+	for controller in [school, patient]:
+		if is_instance_valid(controller):
+			controller.process_mode = Node.PROCESS_MODE_DISABLED
+			controller.hide()
+			controller.queue_free()
+	school = null
+	patient = null
 	for player in players:
 		player.stop()
 	phase = "menu"
@@ -899,6 +906,8 @@ func _menu_key(code: int) -> void:
 
 
 func _open_episode(i: int) -> void:
+	if phase != "menu":
+		return
 	if bool(Data.EPISODES[i]["open"]):
 		episode = i
 		if Data.EPISODES[i].get("mode", "") == "school":
@@ -908,6 +917,14 @@ func _open_episode(i: int) -> void:
 			school.sound_requested.connect(_play)
 			add_child(school)
 			get_viewport().set_input_as_handled()
+			queue_redraw()
+		elif Data.EPISODES[i].get("mode", "") == "patient":
+			phase = "patient"
+			patient = load(PATIENT_SCRIPT).new()
+			patient.connect("leave_requested", _to_menu)
+			patient.connect("sound_requested", _play)
+			get_viewport().set_input_as_handled()
+			add_child(patient)
 			queue_redraw()
 		else:
 			phase = "title"
@@ -1006,7 +1023,7 @@ func _text(pos: Vector2, text: String, size: int, color: Color, align := HORIZON
 
 
 func _draw() -> void:
-	if phase == "school":
+	if phase in ["school", "patient"]:
 		return
 	_draw_background()
 	if phase == "menu":
@@ -1519,6 +1536,17 @@ func _draw_episode_card(i: int, ep: Dictionary) -> void:
 		var ticket := Rect2(inner.position + Vector2(22, 54), Vector2(inner.size.x - 44, 65))
 		SchoolDay.draw_ticket(self, ticket)
 		_text(ticket.position + Vector2(14, 39), "КИНО   /   15:30", 23, SchoolDay.INK)
+	elif ep.get("mode", "") == "patient":
+		draw_rect(inner, tint.darkened(0.4))
+		if patient_background != null:
+			draw_texture_rect(patient_background, inner, false)
+		draw_rect(Rect2(inner.position, Vector2(inner.size.x, 36)), Color(0.08, 0.06, 0.12, 0.7))
+		_text(inner.position + Vector2(14, 25), "ПОЛИКЛИНИКА 404", 16, PAPER)
+		if patient_cast != null:
+			var portrait_height := inner.size.y - 4.0
+			var portrait_width := portrait_height * 480.0 / 830.0
+			var portrait_rect := Rect2(inner.end.x - portrait_width - 8.0, inner.position.y + 4.0, portrait_width, portrait_height)
+			draw_texture_rect_region(patient_cast, portrait_rect, Rect2(0, 0, 480, 830))
 	elif open:
 		# постер: фон кабинета и портрет ЛГ
 		if background != null:

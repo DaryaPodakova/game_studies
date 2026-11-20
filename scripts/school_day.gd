@@ -567,7 +567,7 @@ func _main_button(words: String, action: Callable) -> void:
 
 func _choices(words: Array, action: Callable, top: int) -> void:
 	for i in words.size():
-		_button(Rect2(100, top + i * 56, 735, 48), words[i], action.bind(i), i == 0)
+		_button(Rect2(100, top + i * 56, 735, 48), words[i], action.bind(i))
 
 func _sidebar() -> void:
 	if stage == "catalog":

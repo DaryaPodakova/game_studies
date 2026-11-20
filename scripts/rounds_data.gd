@@ -60,8 +60,9 @@ const EPISODES := [
 		"color": Color("#8a5a6b"), "open": false},
 	{"name": "Детство и реальность", "tagline": "Пять мечт и обратная сторона каждой.",
 		"color": Color("#b0804a"), "open": false},
-	{"name": "Права новых форм жизни", "tagline": "Документы для тех, кого система не предусмотрела.",
-		"color": Color("#5b4a8a"), "open": false},
+	{"name": "Права новых форм жизни", "title": "Пациент не найден", "mode": "patient",
+		"tagline": "В регистратуре нет графы «существует».",
+		"color": Color("#5b4a8a"), "open": true},
 	{"name": "Преподавание", "tagline": "Часы, которых не существовало.",
 		"color": Color("#6b6b3a"), "open": false},
 ]
